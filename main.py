@@ -3,6 +3,7 @@ from threading import Thread
 import discord
 from discord.ext import commands
 import datetime
+import pytz
 import os
 
 app = Flask('')
@@ -29,6 +30,9 @@ bot = commands.Bot(command_prefix='/', intents=intents)
 COLOR_NARANJA = 0xFF8C00  # Código hexadecimal para naranja
 COLOR_ERROR = 0xFF0000    # Rojo para errores
 
+# Zona horaria
+ZONA_HORARIA = pytz.timezone('America/Argentina/Buenos_Aires')
+
 # Diccionario para almacenar los tiempos de inicio de los periodistas
 trabajando = {}
 
@@ -40,6 +44,9 @@ async def on_ready():
         print(f"Sincronizados {len(synced)} comandos")
     except Exception as e:
         print(f"Error al sincronizar comandos: {e}")
+
+def obtener_hora_servidor():
+    return datetime.datetime.now(ZONA_HORARIA)
 
 class TerminarView(discord.ui.View):
     def __init__(self, user_id: int):
@@ -59,12 +66,12 @@ class TerminarView(discord.ui.View):
 
         if self.user_id in trabajando:
             tiempo_inicio = trabajando[self.user_id]
-            tiempo_final = datetime.datetime.now()
-            duracion = tiempo_final - tiempo_inicio
+            tiempo_final = obtener_hora_servidor()
+            duracion = tiempo_final - tiempo_inicio.astimezone(ZONA_HORARIA)
             
-            horas = duracion.seconds // 3600
-            minutos = (duracion.seconds % 3600) // 60
-            segundos = duracion.seconds % 60
+            horas = int(duracion.total_seconds() // 3600)
+            minutos = int((duracion.total_seconds() % 3600) // 60)
+            segundos = int(duracion.total_seconds() % 60)
             
             embed = discord.Embed(
                 title="🎯 Servicio Finalizado",
@@ -74,6 +81,11 @@ class TerminarView(discord.ui.View):
             embed.add_field(
                 name="⏱️ Tiempo en servicio",
                 value=f"{horas}h {minutos}m {segundos}s",
+                inline=False
+            )
+            embed.add_field(
+                name="🕒 Hora de finalización (Hora SV)",
+                value=tiempo_final.strftime("%H:%M:%S"),
                 inline=False
             )
             
@@ -103,7 +115,8 @@ async def trabajar(interaction: discord.Interaction):
         await interaction.response.send_message(embed=embed_error, ephemeral=True)
         return
 
-    trabajando[interaction.user.id] = datetime.datetime.now()
+    hora_inicio = obtener_hora_servidor()
+    trabajando[interaction.user.id] = hora_inicio
     
     embed = discord.Embed(
         title="📰 Inicio de Servicio",
@@ -111,8 +124,8 @@ async def trabajar(interaction: discord.Interaction):
         color=COLOR_NARANJA
     )
     embed.add_field(
-        name="⏰ Hora de inicio",
-        value=trabajando[interaction.user.id].strftime("%H:%M:%S"),
+        name="⏰ Hora de inicio (Hora SV)",
+        value=hora_inicio.strftime("%H:%M:%S"),
         inline=False
     )
 
