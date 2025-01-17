@@ -1,9 +1,25 @@
+from flask import Flask
+from threading import Thread
 import discord
 from discord.ext import commands
 import datetime
-from keep_alive import keep_alive
 import os
 
+# Configuración de Flask
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot Activo!"
+
+def run():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():    
+    server = Thread(target=run)
+    server.start()
+
+# Configuración del bot
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
@@ -82,6 +98,10 @@ async def trabajar(interaction: discord.Interaction):
     view = TerminarView(interaction.user.id)
     await interaction.response.send_message(embed=embed, view=view)
 
-keep_alive()
-token = os.environ['DISCORD_TOKEN']
-bot.run(token)
+if __name__ == '__main__':
+    keep_alive()
+    token = os.environ['DISCORD_TOKEN']
+    try:
+        bot.run(token)
+    except Exception as e:
+        print(f"Error al iniciar el bot: {e}")
