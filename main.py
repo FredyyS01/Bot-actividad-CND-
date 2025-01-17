@@ -1,35 +1,15 @@
-from flask import Flask
-from threading import Thread
 import discord
 from discord.ext import commands
 import datetime
+from keep_alive import keep_alive
 import os
 
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "Bot Activo!"
-
-def run():
-    app.run(host="0.0.0.0", port=8080)
-
-def keep_alive():    
-    server = Thread(target=run)
-    server.start()
-
-# Configuración del bot
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 
 bot = commands.Bot(command_prefix='/', intents=intents)
 
-# Color naranja para los embeds
-COLOR_NARANJA = 0xFF8C00  # Código hexadecimal para naranja
-COLOR_ERROR = 0xFF0000    # Rojo para errores
-
-# Diccionario para almacenar los tiempos de inicio de los periodistas
 trabajando = {}
 
 @bot.event
@@ -49,12 +29,7 @@ class TerminarView(discord.ui.View):
     @discord.ui.button(label="Terminar Labor", style=discord.ButtonStyle.danger)
     async def terminar_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id and not any(role.name.lower() == "directivo" for role in interaction.user.roles):
-            embed_error = discord.Embed(
-                title="⚠️ Error",
-                description="Solo el periodista que inició el servicio o un directivo puede terminarlo.",
-                color=COLOR_ERROR
-            )
-            await interaction.response.send_message(embed=embed_error, ephemeral=True)
+            await interaction.response.send_message("Solo el periodista que inició el servicio o un directivo puede terminarlo.", ephemeral=True)
             return
 
         if self.user_id in trabajando:
@@ -69,7 +44,7 @@ class TerminarView(discord.ui.View):
             embed = discord.Embed(
                 title="🎯 Servicio Finalizado",
                 description=f"El periodista {interaction.user.mention} ha salido de servicio periodístico.",
-                color=COLOR_NARANJA
+                color=discord.Color.green()
             )
             embed.add_field(
                 name="⏱️ Tiempo en servicio",
@@ -79,28 +54,16 @@ class TerminarView(discord.ui.View):
             
             del trabajando[self.user_id]
             
-            # Eliminar el mensaje original
-            await interaction.message.delete()
-            
-            # Enviar el mensaje de finalización
-            await interaction.channel.send(embed=embed)
+            button.disabled = True
+            await interaction.message.edit(view=self)
+            await interaction.response.send_message(embed=embed)
         else:
-            embed_error = discord.Embed(
-                title="⚠️ Error",
-                description="No se encontró el registro de inicio de servicio.",
-                color=COLOR_ERROR
-            )
-            await interaction.response.send_message(embed=embed_error, ephemeral=True)
+            await interaction.response.send_message("Error: No se encontró el registro de inicio de servicio.", ephemeral=True)
 
 @bot.tree.command(name="trabajar", description="Iniciar servicio periodístico")
 async def trabajar(interaction: discord.Interaction):
     if interaction.user.id in trabajando:
-        embed_error = discord.Embed(
-            title="⚠️ Error",
-            description="Ya tienes un servicio activo en este momento.",
-            color=COLOR_ERROR
-        )
-        await interaction.response.send_message(embed=embed_error, ephemeral=True)
+        await interaction.response.send_message("Ya tienes un servicio activo en este momento.", ephemeral=True)
         return
 
     trabajando[interaction.user.id] = datetime.datetime.now()
@@ -108,7 +71,7 @@ async def trabajar(interaction: discord.Interaction):
     embed = discord.Embed(
         title="📰 Inicio de Servicio",
         description=f"El periodista {interaction.user.mention} ha entrado en servicio periodístico.",
-        color=COLOR_NARANJA
+        color=discord.Color.blue()
     )
     embed.add_field(
         name="⏰ Hora de inicio",
@@ -119,7 +82,6 @@ async def trabajar(interaction: discord.Interaction):
     view = TerminarView(interaction.user.id)
     await interaction.response.send_message(embed=embed, view=view)
 
-# Iniciar el bot
 keep_alive()
 token = os.environ['DISCORD_TOKEN']
 bot.run(token)
