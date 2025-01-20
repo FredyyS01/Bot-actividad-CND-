@@ -33,7 +33,7 @@ COLOR_ERROR = 0xFF0000    # Rojo para errores
 # Zona horaria
 ZONA_HORARIA = pytz.timezone('America/Argentina/Buenos_Aires')
 
-# Diccionario para almacenar los tiempos de inicio de los periodistas
+# Diccionario para almacenar los tiempos de inicio y motivos de los periodistas
 trabajando = {}
 
 @bot.event
@@ -65,7 +65,8 @@ class TerminarView(discord.ui.View):
             return
 
         if self.user_id in trabajando:
-            tiempo_inicio = trabajando[self.user_id]
+            tiempo_inicio = trabajando[self.user_id]['tiempo']
+            motivo = trabajando[self.user_id]['motivo']
             tiempo_final = obtener_hora_servidor()
             duracion = tiempo_final - tiempo_inicio.astimezone(ZONA_HORARIA)
             
@@ -77,6 +78,11 @@ class TerminarView(discord.ui.View):
                 title="🎯 Servicio Finalizado",
                 description=f"El periodista {interaction.user.mention} ha salido de servicio periodístico.",
                 color=COLOR_NARANJA
+            )
+            embed.add_field(
+                name="📋 Motivo del servicio",
+                value=motivo,
+                inline=False
             )
             embed.add_field(
                 name="⏱️ Tiempo en servicio",
@@ -105,7 +111,7 @@ class TerminarView(discord.ui.View):
             await interaction.response.send_message(embed=embed_error, ephemeral=True)
 
 @bot.tree.command(name="trabajar", description="Iniciar servicio periodístico")
-async def trabajar(interaction: discord.Interaction):
+async def trabajar(interaction: discord.Interaction, motivo: str):
     if interaction.user.id in trabajando:
         embed_error = discord.Embed(
             title="⚠️ Error",
@@ -115,13 +121,30 @@ async def trabajar(interaction: discord.Interaction):
         await interaction.response.send_message(embed=embed_error, ephemeral=True)
         return
 
+    if not motivo or motivo.isspace():
+        embed_error = discord.Embed(
+            title="⚠️ Error",
+            description="Debes especificar el motivo del servicio.\nEjemplo: `/trabajar Transmisión de radio`",
+            color=COLOR_ERROR
+        )
+        await interaction.response.send_message(embed=embed_error, ephemeral=True)
+        return
+
     hora_inicio = obtener_hora_servidor()
-    trabajando[interaction.user.id] = hora_inicio
+    trabajando[interaction.user.id] = {
+        'tiempo': hora_inicio,
+        'motivo': motivo
+    }
     
     embed = discord.Embed(
         title="📰 Inicio de Servicio",
         description=f"El periodista {interaction.user.mention} ha entrado en servicio periodístico.",
         color=COLOR_NARANJA
+    )
+    embed.add_field(
+        name="📋 Motivo",
+        value=motivo,
+        inline=False
     )
     embed.add_field(
         name="⏰ Hora de inicio (Hora SV)",
