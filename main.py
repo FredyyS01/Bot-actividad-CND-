@@ -26,15 +26,20 @@ intents.members = True
 
 bot = commands.Bot(command_prefix='/', intents=intents)
 
-# Color naranja para los embeds
+# Colores para los embeds
 COLOR_NARANJA = 0xFF8C00  # Código hexadecimal para naranja
 COLOR_ERROR = 0xFF0000    # Rojo para errores
 
 # Zona horaria
 ZONA_HORARIA = pytz.timezone('America/Argentina/Buenos_Aires')
 
-# Diccionario para almacenar los tiempos de inicio y motivos de los periodistas
+# Diccionarios para almacenamiento
 trabajando = {}
+sueldos = {}
+
+# Configuración del canal de sueldos
+CANAL_SUELDOS_ID = 1331364663874551859  # Reemplazar con el ID de tu canal
+mensaje_sueldos_id = None
 
 @bot.event
 async def on_ready():
@@ -47,6 +52,53 @@ async def on_ready():
 
 def obtener_hora_servidor():
     return datetime.datetime.now(ZONA_HORARIA)
+
+async def actualizar_mensaje_sueldos(channel):
+    global mensaje_sueldos_id
+    
+    if not sueldos:
+        embed = discord.Embed(
+            title="📊 Registro de Sueldos",
+            description="No hay sueldos registrados actualmente.",
+            color=COLOR_NARANJA
+        )
+    else:
+        embed = discord.Embed(
+            title="📊 Registro de Sueldos",
+            description="Lista actualizada de sueldos pendientes:",
+            color=COLOR_NARANJA
+        )
+        
+        total_general = 0
+        lista_sueldos = []
+        
+        for user_id, monto in sueldos.items():
+            usuario = await bot.fetch_user(user_id)
+            lista_sueldos.append(f"**{usuario.name}**: ${monto:,}")
+            total_general += monto
+        
+        embed.add_field(
+            name="💰 Sueldos Pendientes",
+            value="\n".join(lista_sueldos),
+            inline=False
+        )
+        embed.add_field(
+            name="💵 Total General",
+            value=f"${total_general:,}",
+            inline=False
+        )
+    
+    # Actualizar o enviar nuevo mensaje
+    if mensaje_sueldos_id:
+        try:
+            mensaje = await channel.fetch_message(mensaje_sueldos_id)
+            await mensaje.edit(embed=embed)
+        except:
+            mensaje = await channel.send(embed=embed)
+            mensaje_sueldos_id = mensaje.id
+    else:
+        mensaje = await channel.send(embed=embed)
+        mensaje_sueldos_id = mensaje.id
 
 class TerminarView(discord.ui.View):
     def __init__(self, user_id: int):
@@ -154,6 +206,138 @@ async def trabajar(interaction: discord.Interaction, motivo: str):
 
     view = TerminarView(interaction.user.id)
     await interaction.response.send_message(embed=embed, view=view)
+
+@bot.tree.command(name="agregar-paga", description="Agregar paga a un integrante")
+async def agregar_paga(interaction: discord.Interaction, usuario: discord.Member, valor: int):
+    # Verificar si el usuario tiene permiso (debe ser directivo)
+    if not any(role.name.lower() == "directivo" for role in interaction.user.roles):
+        embed_error = discord.Embed(
+            title="⚠️ Error",
+            description="Solo los directivos pueden gestionar los sueldos.",
+            color=COLOR_ERROR
+        )
+        await interaction.response.send_message(embed=embed_error, ephemeral=True)
+        return
+
+    if valor <= 0:
+        embed_error = discord.Embed(
+            title="⚠️ Error",
+            description="El valor debe ser mayor a 0.",
+            color=COLOR_ERROR
+        )
+        await interaction.response.send_message(embed=embed_error, ephemeral=True)
+        return
+
+    # Agregar o actualizar el sueldo
+    if usuario.id in sueldos:
+        sueldos[usuario.id] += valor
+    else:
+        sueldos[usuario.id] = valor
+
+    # Actualizar mensaje en el canal de sueldos
+    canal_sueldos = bot.get_channel(CANAL_SUELDOS_ID)
+    await actualizar_mensaje_sueldos(canal_sueldos)
+
+    embed = discord.Embed(
+        title="✅ Paga Agregada",
+        description=f"Se ha agregado ${valor:,} al sueldo de {usuario.mention}",
+        color=COLOR_NARANJA
+    )
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="retirar-dinero", description="Retirar dinero del sueldo de un integrante")
+async def retirar_dinero(interaction: discord.Interaction, usuario: discord.Member, valor: int):
+    # Verificar si el usuario tiene permiso
+    if not any(role.name.lower() == "directivo" for role in interaction.user.roles):
+        embed_error = discord.Embed(
+            title="⚠️ Error",
+            description="Solo los directivos pueden gestionar los sueldos.",
+            color=COLOR_ERROR
+        )
+        await interaction.response.send_message(embed=embed_error, ephemeral=True)
+        return
+
+    if usuario.id not in sueldos:
+        embed_error = discord.Embed(
+            title="⚠️ Error",
+            description="Este usuario no tiene sueldo registrado.",
+            color=COLOR_ERROR
+        )
+        await interaction.response.send_message(embed=embed_error, ephemeral=True)
+        return
+
+    if valor <= 0:
+        embed_error = discord.Embed(
+            title="⚠️ Error",
+            description="El valor debe ser mayor a 0.",
+            color=COLOR_ERROR
+        )
+        await interaction.response.send_message(embed=embed_error, ephemeral=True)
+        return
+
+    if valor > sueldos[usuario.id]:
+        embed_error = discord.Embed(
+            title="⚠️ Error",
+            description="El valor a retirar es mayor que el saldo disponible.",
+            color=COLOR_ERROR
+        )
+        await interaction.response.send_message(embed=embed_error, ephemeral=True)
+        return
+
+    # Retirar el dinero
+    sueldos[usuario.id] -= valor
+    if sueldos[usuario.id] == 0:
+        del sueldos[usuario.id]
+
+    # Actualizar mensaje en el canal de sueldos
+    canal_sueldos = bot.get_channel(CANAL_SUELDOS_ID)
+    await actualizar_mensaje_sueldos(canal_sueldos)
+
+    embed = discord.Embed(
+        title="💸 Dinero Retirado",
+        description=f"Se han retirado ${valor:,} del sueldo de {usuario.mention}",
+        color=COLOR_NARANJA
+    )
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="limpiar", description="Limpiar todos los registros de sueldos")
+async def limpiar(interaction: discord.Interaction):
+    # Verificar si el usuario tiene permiso
+    if not any(role.name.lower() == "directivo" for role in interaction.user.roles):
+        embed_error = discord.Embed(
+            title="⚠️ Error",
+            description="Solo los directivos pueden limpiar los registros de sueldos.",
+            color=COLOR_ERROR
+        )
+        await interaction.response.send_message(embed=embed_error, ephemeral=True)
+        return
+
+    # Confirmar que hay algo que limpiar
+    if not sueldos:
+        embed_error = discord.Embed(
+            title="ℹ️ Información",
+            description="No hay registros de sueldos para limpiar.",
+            color=COLOR_NARANJA
+        )
+        await interaction.response.send_message(embed=embed_error, ephemeral=True)
+        return
+
+    # Guardar total antes de limpiar
+    total_limpiado = sum(sueldos.values())
+    
+    # Limpiar registros
+    sueldos.clear()
+
+    # Actualizar mensaje en el canal de sueldos
+    canal_sueldos = bot.get_channel(CANAL_SUELDOS_ID)
+    await actualizar_mensaje_sueldos(canal_sueldos)
+
+    embed = discord.Embed(
+        title="🧹 Registros Limpiados",
+        description=f"Se han limpiado todos los registros de sueldos.\nTotal liquidado: ${total_limpiado:,}",
+        color=COLOR_NARANJA
+    )
+    await interaction.response.send_message(embed=embed)
 
 # Iniciar el bot
 keep_alive()
