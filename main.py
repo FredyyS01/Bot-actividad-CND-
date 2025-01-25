@@ -43,8 +43,8 @@ servicios_finalizados = {}  # Nuevo diccionario para servicios finalizados
 historial_servicios = {} # Diccionario de estadísticas
 
 # Configuración de canales
-CANAL_SUELDOS_ID = 1331365022043213865  # Reemplazar con el ID de tu canal
-CANAL_EVIDENCIAS_ID = 1331707524537389067  # Reemplazar con el ID de tu canal de evidencias
+CANAL_SUELDOS_ID = 1332751038146412577  # Reemplazar con el ID de tu canal
+CANAL_EVIDENCIAS_ID = 1332751038146412577  # Reemplazar con el ID de tu canal de evidencias
 mensaje_sueldos_id = None
 
 @bot.event
