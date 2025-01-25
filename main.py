@@ -43,7 +43,7 @@ servicios_finalizados = {}  # Nuevo diccionario para servicios finalizados
 historial_servicios = {} # Diccionario de estadísticas
 
 # Configuración de canales
-CANAL_SUELDOS_ID = 1332751038146412577  # Reemplazar con el ID de tu canal
+CANAL_SUELDOS_ID = 1331364663874551859  # Reemplazar con el ID de tu canal
 CANAL_EVIDENCIAS_ID = 1332751038146412577  # Reemplazar con el ID de tu canal de evidencias
 mensaje_sueldos_id = None
 
@@ -604,7 +604,7 @@ async def estadisticas(interaction: discord.Interaction, usuario: discord.Member
 
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="limpiar-estadistica", description="Limpiar registros de estadísticas")
+@bot.tree.command(name="limpiar-estadisticas", description="Limpiar registros de estadísticas")
 async def limpiar_estadistica(interaction: discord.Interaction, usuario: discord.Member = None):
     # Verificar si el usuario tiene el rol "directivo"
     if not any(role.name.lower() == "directivo" for role in interaction.user.roles):
