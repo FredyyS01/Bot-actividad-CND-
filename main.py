@@ -328,6 +328,76 @@ async def evidencia(
     )
     embed.add_field(
         name="🕒 Fin del Servicio",
+@bot.tree.command(name="evidencia", description="Anexar evidencias de tu servicio finalizado")
+async def evidencia(
+    interaction: discord.Interaction, 
+    imagen1: discord.Attachment = None,
+    imagen2: discord.Attachment = None,
+    imagen3: discord.Attachment = None,
+):
+    usuario_id = interaction.user.id
+    
+    if usuario_id not in servicios_finalizados:
+        embed_error = discord.Embed(
+            title="⚠️ Error",
+            description="No tienes un servicio finalizado recientemente o aún estás en servicio.",
+            color=COLOR_ERROR
+        )
+        await interaction.response.send_message(embed=embed_error, ephemeral=True)
+        return
+
+    tiempo_actual = obtener_hora_servidor()
+    tiempo_fin = servicios_finalizados[usuario_id]['tiempo_fin']
+    if tiempo_actual - tiempo_fin > timedelta(minutes=5):
+        del servicios_finalizados[usuario_id]
+        embed_error = discord.Embed(
+            title="⚠️ Error",
+            description="Han pasado más de 5 minutos desde que finalizaste tu servicio. Ya no puedes enviar evidencias.",
+            color=COLOR_ERROR
+        )
+        await interaction.response.send_message(embed=embed_error, ephemeral=True)
+        return
+
+    if not any([imagen1, imagen2, imagen3]):
+        embed_error = discord.Embed(
+            title="⚠️ Error",
+            description="Debes proporcionar al menos una evidencia.",
+            color=COLOR_ERROR
+        )
+        await interaction.response.send_message(embed=embed_error, ephemeral=True)
+        return
+
+    canal_evidencias = bot.get_channel(CANAL_EVIDENCIAS_ID)
+    await interaction.response.defer()
+
+    servicio_info = servicios_finalizados[usuario_id]
+    duracion = servicio_info['duracion']
+    horas = int(duracion.total_seconds() // 3600)
+    minutos = int((duracion.total_seconds() % 3600) // 60)
+    segundos = int(duracion.total_seconds() % 60)
+
+    embed = discord.Embed(
+        title="📊 Registro de Actividad",
+        description=f"Evidencias enviadas por {interaction.user.mention}",
+        color=COLOR_NARANJA
+    )
+    embed.add_field(
+        name="⏱️ Duración del Servicio",
+        value=f"{horas}h {minutos}m {segundos}s",
+        inline=False
+    )
+    embed.add_field(
+        name="📋 Motivo del Servicio",
+        value=servicio_info['motivo'],
+        inline=False
+    )
+    embed.add_field(
+        name="🕒 Inicio del Servicio",
+        value=servicio_info['tiempo_inicio'].strftime("%H:%M:%S"),
+        inline=True
+    )
+    embed.add_field(
+        name="🕒 Fin del Servicio",
         value=servicio_info['tiempo_fin'].strftime("%H:%M:%S"),
         inline=True
     )
@@ -343,12 +413,8 @@ async def evidencia(
         archivos.append(await imagen2.to_file())
         evidencias_count += 1
 
-    if link and re.match(r'(http(s?):)([/|.|\w|\s|-])*\.(?:jpg|gif|png|mp4|jpeg)', link.lower()):
-        embed.add_field(
-            name="🔗 Link adicional",
-            value=link,
-            inline=False
-        )
+    if imagen3 and imagen3.content_type.startswith(('image/', 'video/')):
+        archivos.append(await imagen2.to_file())
         evidencias_count += 1
 
     if evidencias_count > 0:
