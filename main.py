@@ -118,9 +118,12 @@ async def actualizar_mensaje_sueldos(channel):
                 lista_sueldos.append(f"**{usuario.name}**: ${monto:,}")
             total_general += monto
 
+        # Aquí está la corrección - usar join con un salto de línea real
+        sueldos_texto = "\n".join(lista_sueldos)
+
         embed.add_field(
             name="💰 Sueldos Pendientes",
-            value="\\n".join(lista_sueldos),
+            value=sueldos_texto,
             inline=False
         )
         embed.add_field(
