@@ -169,7 +169,7 @@ class TerminarView(discord.ui.View):
             pago_por_hora = obtener_pago_por_hora(interaction.guild.get_member(self.user_id))
             pago_total = calcular_pago(pago_por_hora, duracion)
 
-            # Guardar en historial
+            # Guardar en historial pero SIN agregar al sueldo todavía
             if self.user_id not in historial_servicios:
                 historial_servicios[self.user_id] = []
 
@@ -179,7 +179,8 @@ class TerminarView(discord.ui.View):
                 'hora_fin': tiempo_final.strftime("%H:%M:%S"),
                 'duracion': duracion,
                 'motivo': motivo,
-                'pago': pago_total
+                'pago': pago_total,
+                'pago_registrado': False  # Indicador de que el pago aún no se ha registrado
             })
 
             servicios_finalizados[self.user_id] = {
@@ -189,16 +190,6 @@ class TerminarView(discord.ui.View):
                 'tiempo_inicio': tiempo_inicio,
                 'pago': pago_total
             }
-
-            # Agregar el pago al sueldo del usuario
-            if self.user_id in sueldos:
-                sueldos[self.user_id] += pago_total
-            else:
-                sueldos[self.user_id] = pago_total
-
-            # Actualizar mensaje de sueldos
-            canal_sueldos = bot.get_channel(CANAL_SUELDOS_ID)
-            await actualizar_mensaje_sueldos(canal_sueldos)
 
             horas = int(duracion.total_seconds() // 3600)
             minutos = int((duracion.total_seconds() % 3600) // 60)
@@ -224,8 +215,8 @@ class TerminarView(discord.ui.View):
                 inline=False
             )
             embed.add_field(
-                name="💰 Pago por servicio",
-                value=f"${pago_total:,}",
+                name="💰 Pago pendiente por servicio",
+                value=f"${pago_total:,} (se registrará al enviar evidencias)",
                 inline=False
             )
             embed.add_field(
@@ -274,7 +265,7 @@ async def trabajar(interaction: discord.Interaction, motivo: str):
             segundos = int(tiempo_restante.total_seconds() % 60)
             embed_error = discord.Embed(
                 title="⚠️ Error",
-                description=f"Tienes un servicio pendiente de evidencias.\\n"
+                description=f"Tienes un servicio pendiente de evidencias."
                            f"Debes enviar las evidencias del servicio anterior usando `/evidencia` o esperar "
                            f"{minutos}m {segundos}s para que expire el tiempo límite.",
                 color=COLOR_ERROR
@@ -326,7 +317,7 @@ async def trabajar(interaction: discord.Interaction, motivo: str):
 
 @bot.tree.command(name="evidencia", description="Anexar evidencias de tu servicio finalizado")
 async def evidencia(
-    interaction: discord.Interaction, 
+    interaction: discord.Interaction,
     imagen1: discord.Attachment = None,
     imagen2: discord.Attachment = None,
     imagen3: discord.Attachment = None,
@@ -368,6 +359,25 @@ async def evidencia(
 
     servicio_info = servicios_finalizados[usuario_id]
     duracion = servicio_info['duracion']
+    pago_total = servicio_info['pago']
+
+    # Agregar el pago al sueldo del usuario AHORA que ha enviado evidencias
+    if usuario_id in sueldos:
+        sueldos[usuario_id] += pago_total
+    else:
+        sueldos[usuario_id] = pago_total
+
+    # Actualizar el historial para marcar que el pago ya se registró
+    for servicio in historial_servicios.get(usuario_id, []):
+        if (servicio['hora_inicio'] == servicio_info['tiempo_inicio'].strftime("%H:%M:%S") and
+            servicio['hora_fin'] == servicio_info['tiempo_fin'].strftime("%H:%M:%S")):
+            servicio['pago_registrado'] = True
+            break
+
+    # Actualizar mensaje de sueldos
+    canal_sueldos = bot.get_channel(CANAL_SUELDOS_ID)
+    await actualizar_mensaje_sueldos(canal_sueldos)
+
     horas = int(duracion.total_seconds() // 3600)
     minutos = int((duracion.total_seconds() % 3600) // 60)
     segundos = int(duracion.total_seconds() % 60)
@@ -392,7 +402,7 @@ async def evidencia(
     )
     embed.add_field(
         name="💰 Pago por servicio",
-        value=f"${servicio_info['pago']:,}",
+        value=f"${pago_total:,} (registrado)",
         inline=False
     )
     embed.add_field(
@@ -418,7 +428,7 @@ async def evidencia(
         evidencias_count += 1
 
     if imagen3 and imagen3.content_type.startswith(('image/', 'video/')):
-        archivos.append(await imagen3.to_file())  # Corregido: era imagen3 en lugar de imagen2
+        archivos.append(await imagen3.to_file())
         evidencias_count += 1
 
     if evidencias_count > 0:
@@ -433,7 +443,7 @@ async def evidencia(
         del servicios_finalizados[usuario_id]
         embed_success = discord.Embed(
             title="✅ Evidencias Enviadas",
-            description=f"Se han registrado correctamente {evidencias_count} evidencia(s).",
+            description=f"Se han registrado correctamente {evidencias_count} evidencia(s) y se ha añadido ${pago_total:,} a tu sueldo.",
             color=COLOR_NARANJA
         )
         await interaction.followup.send(embed=embed_success)
