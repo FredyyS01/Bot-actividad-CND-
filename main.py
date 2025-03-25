@@ -605,7 +605,7 @@ async def estadisticas(interaction: discord.Interaction, usuario: discord.Member
         )
 
         # Lista de servicios
-        servicios_str = "Lista de servicios:\\n"
+        servicios_str = "Lista de servicios:"
         for servicio in servicios:
             duracion = servicio['duracion']
             horas = int(duracion.total_seconds() // 3600)
@@ -615,7 +615,7 @@ async def estadisticas(interaction: discord.Interaction, usuario: discord.Member
             pago_str = f", Pago: ${servicio.get('pago', 0):,}" if 'pago' in servicio else ""
 
             servicios_str += f"• {servicio['fecha']}, Motivo: {servicio['motivo']}, "
-            servicios_str += f"{horas}h {minutos}M {segundos}s{pago_str}\\n"
+            servicios_str += f"{horas}h {minutos}M {segundos}s{pago_str} "
 
         embed.add_field(
             name="📋 Servicios Registrados",
