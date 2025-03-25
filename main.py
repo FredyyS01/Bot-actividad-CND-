@@ -36,6 +36,15 @@ COLOR_ERROR = 0xFF0000    # Rojo para errores
 # Zona horaria
 ZONA_HORARIA = pytz.timezone('America/Argentina/Buenos_Aires')
 
+# Definir rangos y pagos por hora
+RANGOS_PAGOS = {
+    "practicante": 15000,
+    "periodista": 16000,
+    "reportero": 17000,
+    "supervisor": 18000,
+    "vice director": 20000
+}
+
 # Diccionarios para almacenamiento
 trabajando = {}
 sueldos = {}
@@ -46,6 +55,27 @@ historial_servicios = {} # Diccionario de estadísticas
 CANAL_SUELDOS_ID = 1295477203898859610  # Reemplazar con el ID de tu canal
 CANAL_EVIDENCIAS_ID = 1336202299311394827  # Reemplazar con el ID de tu canal de evidencias
 mensaje_sueldos_id = None
+
+# Función para obtener el nombre a mostrar (apodo o nombre de usuario)
+def get_display_name(member):
+    return member.nick if member.nick else member.name
+
+# Función para obtener el pago por hora según el rango
+def obtener_pago_por_hora(member):
+    for role in member.roles:
+        role_name = role.name.lower()
+        if role_name in RANGOS_PAGOS:
+            return RANGOS_PAGOS[role_name]
+    # Si no tiene ningún rol de los definidos, se asume practicante
+    return RANGOS_PAGOS["practicante"]
+
+# Función para calcular el pago según el tiempo trabajado
+def calcular_pago(pago_por_hora, duracion):
+    # Convertir la duración a horas (como número decimal)
+    horas_trabajadas = duracion.total_seconds() / 3600
+    # Calcular el pago proporcional al tiempo trabajado
+    pago_total = int(pago_por_hora * horas_trabajadas)
+    return pago_total
 
 @bot.event
 async def on_ready():
@@ -79,13 +109,18 @@ async def actualizar_mensaje_sueldos(channel):
         lista_sueldos = []
 
         for user_id, monto in sueldos.items():
-            usuario = await bot.fetch_user(user_id)
-            lista_sueldos.append(f"**{usuario.name}**: ${monto:,}")
+            member = channel.guild.get_member(user_id)
+            if member:
+                display_name = get_display_name(member)
+                lista_sueldos.append(f"**{display_name}**: ${monto:,}")
+            else:
+                usuario = await bot.fetch_user(user_id)
+                lista_sueldos.append(f"**{usuario.name}**: ${monto:,}")
             total_general += monto
 
         embed.add_field(
             name="💰 Sueldos Pendientes",
-            value="\n".join(lista_sueldos),
+            value="\\n".join(lista_sueldos),
             inline=False
         )
         embed.add_field(
@@ -126,33 +161,53 @@ class TerminarView(discord.ui.View):
             motivo = trabajando[self.user_id]['motivo']
             tiempo_final = obtener_hora_servidor()
             duracion = tiempo_final - tiempo_inicio.astimezone(ZONA_HORARIA)
-            
+
+            # Calcular pago según rango y tiempo
+            pago_por_hora = obtener_pago_por_hora(interaction.guild.get_member(self.user_id))
+            pago_total = calcular_pago(pago_por_hora, duracion)
+
             # Guardar en historial
             if self.user_id not in historial_servicios:
                 historial_servicios[self.user_id] = []
-            
+
             historial_servicios[self.user_id].append({
                 'fecha': tiempo_final.strftime("%d/%m/%Y"),
                 'hora_inicio': tiempo_inicio.strftime("%H:%M:%S"),
                 'hora_fin': tiempo_final.strftime("%H:%M:%S"),
                 'duracion': duracion,
-                'motivo': motivo
+                'motivo': motivo,
+                'pago': pago_total
             })
 
             servicios_finalizados[self.user_id] = {
                 'tiempo_fin': tiempo_final,
                 'duracion': duracion,
                 'motivo': motivo,
-                'tiempo_inicio': tiempo_inicio
+                'tiempo_inicio': tiempo_inicio,
+                'pago': pago_total
             }
-            
+
+            # Agregar el pago al sueldo del usuario
+            if self.user_id in sueldos:
+                sueldos[self.user_id] += pago_total
+            else:
+                sueldos[self.user_id] = pago_total
+
+            # Actualizar mensaje de sueldos
+            canal_sueldos = bot.get_channel(CANAL_SUELDOS_ID)
+            await actualizar_mensaje_sueldos(canal_sueldos)
+
             horas = int(duracion.total_seconds() // 3600)
             minutos = int((duracion.total_seconds() % 3600) // 60)
             segundos = int(duracion.total_seconds() % 60)
-            
+
+            # Obtener el apodo del usuario
+            member = interaction.guild.get_member(self.user_id)
+            display_name = get_display_name(member)
+
             embed = discord.Embed(
                 title="🎯 Servicio Finalizado",
-                description=f"El periodista {interaction.user.mention} ha salido de servicio periodístico.",
+                description=f"El periodista {interaction.guild.get_member(self.user_id).mention} ha salido de servicio periodístico.",
                 color=COLOR_NARANJA
             )
             embed.add_field(
@@ -166,6 +221,11 @@ class TerminarView(discord.ui.View):
                 inline=False
             )
             embed.add_field(
+                name="💰 Pago por servicio",
+                value=f"${pago_total:,}",
+                inline=False
+            )
+            embed.add_field(
                 name="🕒 Hora de finalización (Hora SV)",
                 value=tiempo_final.strftime("%H:%M:%S"),
                 inline=False
@@ -175,7 +235,7 @@ class TerminarView(discord.ui.View):
                 value="Tienes 5 minutos para enviar las evidencias usando el comando `/evidencia`",
                 inline=False
             )
-            
+
             del trabajando[self.user_id]
             await interaction.message.delete()
             await interaction.channel.send(embed=embed)
@@ -211,7 +271,7 @@ async def trabajar(interaction: discord.Interaction, motivo: str):
             segundos = int(tiempo_restante.total_seconds() % 60)
             embed_error = discord.Embed(
                 title="⚠️ Error",
-                description=f"Tienes un servicio pendiente de evidencias.\n"
+                description=f"Tienes un servicio pendiente de evidencias.\\n"
                            f"Debes enviar las evidencias del servicio anterior usando `/evidencia` o esperar "
                            f"{minutos}m {segundos}s para que expire el tiempo límite.",
                 color=COLOR_ERROR
@@ -226,7 +286,7 @@ async def trabajar(interaction: discord.Interaction, motivo: str):
     if not motivo or motivo.isspace():
         embed_error = discord.Embed(
             title="⚠️ Error",
-            description="Debes especificar el motivo del servicio.\nEjemplo: `/trabajar Transmisión de radio`",
+            description="Debes especificar el motivo del servicio.\\nEjemplo: `/trabajar Transmisión de radio`",
             color=COLOR_ERROR
         )
         await interaction.response.send_message(embed=embed_error, ephemeral=True)
@@ -238,7 +298,10 @@ async def trabajar(interaction: discord.Interaction, motivo: str):
         'tiempo': hora_inicio,
         'motivo': motivo
     }
-    
+
+    # Usar el apodo en lugar del nombre de usuario
+    display_name = get_display_name(interaction.user)
+
     embed = discord.Embed(
         title="📰 Inicio de Servicio",
         description=f"El periodista {interaction.user.mention} ha entrado en servicio periodístico.",
@@ -266,7 +329,7 @@ async def evidencia(
     imagen3: discord.Attachment = None,
 ):
     usuario_id = interaction.user.id
-    
+
     if usuario_id not in servicios_finalizados:
         embed_error = discord.Embed(
             title="⚠️ Error",
@@ -306,6 +369,9 @@ async def evidencia(
     minutos = int((duracion.total_seconds() % 3600) // 60)
     segundos = int(duracion.total_seconds() % 60)
 
+    # Usar el apodo en lugar del nombre de usuario
+    display_name = get_display_name(interaction.user)
+
     embed = discord.Embed(
         title="📊 Registro de Actividad",
         description=f"Evidencias enviadas por {interaction.user.mention}",
@@ -319,6 +385,11 @@ async def evidencia(
     embed.add_field(
         name="📋 Motivo del Servicio",
         value=servicio_info['motivo'],
+        inline=False
+    )
+    embed.add_field(
+        name="💰 Pago por servicio",
+        value=f"${servicio_info['pago']:,}",
         inline=False
     )
     embed.add_field(
@@ -344,7 +415,7 @@ async def evidencia(
         evidencias_count += 1
 
     if imagen3 and imagen3.content_type.startswith(('image/', 'video/')):
-        archivos.append(await imagen2.to_file())
+        archivos.append(await imagen3.to_file())  # Corregido: era imagen3 en lugar de imagen2
         evidencias_count += 1
 
     if evidencias_count > 0:
@@ -353,9 +424,9 @@ async def evidencia(
             value=f"Se adjuntaron {evidencias_count} evidencia(s)",
             inline=False
         )
-        
+
         await canal_evidencias.send(embed=embed, files=archivos)
-        
+
         del servicios_finalizados[usuario_id]
         embed_success = discord.Embed(
             title="✅ Evidencias Enviadas",
@@ -398,6 +469,9 @@ async def agregar_paga(interaction: discord.Interaction, usuario: discord.Member
 
     canal_sueldos = bot.get_channel(CANAL_SUELDOS_ID)
     await actualizar_mensaje_sueldos(canal_sueldos)
+
+    # Usar el apodo en lugar del nombre de usuario
+    display_name = get_display_name(usuario)
 
     embed = discord.Embed(
         title="✅ Paga Agregada",
@@ -451,6 +525,9 @@ async def retirar_dinero(interaction: discord.Interaction, usuario: discord.Memb
     canal_sueldos = bot.get_channel(CANAL_SUELDOS_ID)
     await actualizar_mensaje_sueldos(canal_sueldos)
 
+    # Usar el apodo en lugar del nombre de usuario
+    display_name = get_display_name(usuario)
+
     embed = discord.Embed(
         title="💸 Dinero Retirado",
         description=f"Se han retirado ${valor:,} del sueldo de {usuario.mention}",
@@ -486,7 +563,7 @@ async def limpiar(interaction: discord.Interaction):
 
     embed = discord.Embed(
         title="🧹 Registros Limpiados",
-        description=f"Se han limpiado todos los registros de sueldos.\nTotal liquidado: ${total_limpiado:,}",
+        description=f"Se han limpiado todos los registros de sueldos.\\nTotal liquidado: ${total_limpiado:,}",
         color=COLOR_NARANJA
     )
     await interaction.response.send_message(embed=embed)
@@ -506,28 +583,36 @@ async def estadisticas(interaction: discord.Interaction, usuario: discord.Member
 
         servicios = historial_servicios[usuario.id]
         tiempo_total = timedelta()
-        
-        # Calcular tiempo total
+        pago_total = 0
+
+        # Calcular tiempo total y pago total
         for servicio in servicios:
             tiempo_total += servicio['duracion']
-        
+            if 'pago' in servicio:
+                pago_total += servicio['pago']
+
+        # Usar el apodo en lugar del nombre de usuario
+        display_name = get_display_name(usuario)
+
         # Crear embed
         embed = discord.Embed(
             title="📊 Estadística General",
-            description=f"Periodista: {usuario.name} ({usuario.mention})",
+            description=f"Periodista: {display_name} ({usuario.mention})",
             color=COLOR_NARANJA
         )
 
         # Lista de servicios
-        servicios_str = "Lista de servicios:\n"
+        servicios_str = "Lista de servicios:\\n"
         for servicio in servicios:
             duracion = servicio['duracion']
             horas = int(duracion.total_seconds() // 3600)
             minutos = int((duracion.total_seconds() % 3600) // 60)
             segundos = int(duracion.total_seconds() % 60)
-            
+
+            pago_str = f", Pago: ${servicio.get('pago', 0):,}" if 'pago' in servicio else ""
+
             servicios_str += f"• {servicio['fecha']}, Motivo: {servicio['motivo']}, "
-            servicios_str += f"{horas}h {minutos}M {segundos}s\n"
+            servicios_str += f"{horas}h {minutos}M {segundos}s{pago_str}\\n"
 
         embed.add_field(
             name="📋 Servicios Registrados",
@@ -539,10 +624,17 @@ async def estadisticas(interaction: discord.Interaction, usuario: discord.Member
         horas_total = int(tiempo_total.total_seconds() // 3600)
         minutos_total = int((tiempo_total.total_seconds() % 3600) // 60)
         segundos_total = int(tiempo_total.total_seconds() % 60)
-        
+
         embed.add_field(
             name="⏱️ Tiempo Total General",
             value=f"{horas_total}h {minutos_total}M {segundos_total}s",
+            inline=False
+        )
+
+        # Pago total
+        embed.add_field(
+            name="💰 Pago Total",
+            value=f"${pago_total:,}",
             inline=False
         )
 
@@ -564,26 +656,38 @@ async def estadisticas(interaction: discord.Interaction, usuario: discord.Member
         )
 
         tiempo_total_general = timedelta()
+        pago_total_general = 0
         lista_servicios = []
 
         # Calcular tiempo total por usuario
         for user_id, servicios in historial_servicios.items():
             tiempo_usuario = timedelta()
+            pago_usuario = 0
+
             for servicio in servicios:
                 tiempo_usuario += servicio['duracion']
-            
-            usuario = await bot.fetch_user(user_id)
+                if 'pago' in servicio:
+                    pago_usuario += servicio['pago']
+
+            member = interaction.guild.get_member(user_id)
+            if member:
+                display_name = get_display_name(member)
+            else:
+                usuario = await bot.fetch_user(user_id)
+                display_name = usuario.name
+
             horas = int(tiempo_usuario.total_seconds() // 3600)
             minutos = int((tiempo_usuario.total_seconds() % 3600) // 60)
             segundos = int(tiempo_usuario.total_seconds() % 60)
-            
-            lista_servicios.append(f"• {usuario.name}: {horas}h {minutos}M {segundos}s")
+
+            lista_servicios.append(f"• {display_name}: {horas}h {minutos}M {segundos}s, Pago: ${pago_usuario:,}")
             tiempo_total_general += tiempo_usuario
+            pago_total_general += pago_usuario
 
         # Agregar lista de servicios
         embed.add_field(
             name="📋 Tiempo Total por Periodista",
-            value="\n".join(lista_servicios),
+            value="\\n".join(lista_servicios),
             inline=False
         )
 
@@ -591,10 +695,17 @@ async def estadisticas(interaction: discord.Interaction, usuario: discord.Member
         horas = int(tiempo_total_general.total_seconds() // 3600)
         minutos = int((tiempo_total_general.total_seconds() % 3600) // 60)
         segundos = int(tiempo_total_general.total_seconds() % 60)
-        
+
         embed.add_field(
             name="⏱️ Tiempo Total General",
             value=f"{horas}h {minutos}M {segundos}s",
+            inline=False
+        )
+
+        # Agregar pago total general
+        embed.add_field(
+            name="💰 Pago Total General",
+            value=f"${pago_total_general:,}",
             inline=False
         )
 
@@ -615,9 +726,12 @@ async def limpiar_estadistica(interaction: discord.Interaction, usuario: discord
     # Si se especifica un usuario
     if usuario:
         if usuario.id not in historial_servicios or not historial_servicios[usuario.id]:
+            # Usar el apodo en lugar del nombre de usuario
+            display_name = get_display_name(usuario)
+
             embed_error = discord.Embed(
                 title="⚠️ Error",
-                description=f"No hay registros de estadísticas para {usuario.name}.",
+                description=f"No hay registros de estadísticas para {display_name}.",
                 color=COLOR_ERROR
             )
             await interaction.response.send_message(embed=embed_error, ephemeral=True)
@@ -626,6 +740,8 @@ async def limpiar_estadistica(interaction: discord.Interaction, usuario: discord
         # Guardar estadísticas antes de limpiar para mostrar resumen
         servicios = len(historial_servicios[usuario.id])
         tiempo_total = sum(servicio['duracion'].total_seconds() for servicio in historial_servicios[usuario.id])
+        pago_total = sum(servicio.get('pago', 0) for servicio in historial_servicios[usuario.id])
+
         horas = int(tiempo_total // 3600)
         minutos = int((tiempo_total % 3600) // 60)
         segundos = int(tiempo_total % 60)
@@ -634,13 +750,13 @@ async def limpiar_estadistica(interaction: discord.Interaction, usuario: discord
         del historial_servicios[usuario.id]
 
         embed = discord.Embed(
-title="🗑️ Estadísticas Limpiadas",
+            title="🗑️ Estadísticas Limpiadas",
             description=f"Se han limpiado las estadísticas de {usuario.mention}",
             color=COLOR_NARANJA
         )
         embed.add_field(
             name="📊 Resumen de registros eliminados",
-            value=f"• Total de servicios: {servicios}\n• Tiempo total: {horas}h {minutos}M {segundos}s",
+            value=f"• Total de servicios: {servicios}\\n• Tiempo total: {horas}h {minutos}M {segundos}s\\n• Pago total: ${pago_total:,}",
             inline=False
         )
 
@@ -658,9 +774,13 @@ title="🗑️ Estadísticas Limpiadas",
         # Guardar estadísticas generales antes de limpiar
         total_servicios = sum(len(servicios) for servicios in historial_servicios.values())
         tiempo_total = timedelta()
+        pago_total = 0
+
         for servicios in historial_servicios.values():
             for servicio in servicios:
                 tiempo_total += servicio['duracion']
+                if 'pago' in servicio:
+                    pago_total += servicio['pago']
 
         horas = int(tiempo_total.total_seconds() // 3600)
         minutos = int((tiempo_total.total_seconds() % 3600) // 60)
@@ -675,10 +795,10 @@ title="🗑️ Estadísticas Limpiadas",
             color=COLOR_NARANJA
         )
         embed.add_field(
-    name="📊 Resumen de registros eliminados",  # Corregido: comillas correctamente cerradas
-    value=f"• Total de servicios: {total_servicios}\n• Tiempo total: {horas}h {minutos}M {segundos}s",
-    inline=False
-)
+            name="📊 Resumen de registros eliminados",
+            value=f"• Total de servicios: {total_servicios}\\n• Tiempo total: {horas}h {minutos}M {segundos}s\\n• Pago total: ${pago_total:,}",
+            inline=False
+        )
 
     await interaction.response.send_message(embed=embed)
 
