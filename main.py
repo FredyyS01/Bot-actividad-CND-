@@ -576,7 +576,7 @@ async def limpiar(interaction: discord.Interaction):
 
     embed = discord.Embed(
         title="🧹 Registros Limpiados",
-        description=f"Se han limpiado todos los registros de sueldos.\\nTotal liquidado: ${total_limpiado:,}",
+        description=f"Se han limpiado todos los registros de sueldos. Total liquidado: ${total_limpiado:,}",
         color=COLOR_NARANJA
     )
     await interaction.response.send_message(embed=embed)
@@ -774,7 +774,7 @@ async def limpiar_estadistica(interaction: discord.Interaction, usuario: discord
         )
         embed.add_field(
             name="📊 Resumen de registros eliminados",
-            value=f"• Total de servicios: {servicios}\\n• Tiempo total: {horas}h {minutos}M {segundos}s\\n• Pago total: ${pago_total:,}",
+            value=f"• Total de servicios: {servicios} • Tiempo total: {horas}h {minutos}M {segundos}s • Pago total: ${pago_total:,}",
             inline=False
         )
 
@@ -814,7 +814,7 @@ async def limpiar_estadistica(interaction: discord.Interaction, usuario: discord
         )
         embed.add_field(
             name="📊 Resumen de registros eliminados",
-            value=f"• Total de servicios: {total_servicios}\\n• Tiempo total: {horas}h {minutos}M {segundos}s\\n• Pago total: ${pago_total:,}",
+            value=f"• Total de servicios: {total_servicios} • Tiempo total: {horas}h {minutos}M {segundos}s • Pago total: ${pago_total:,}",
             inline=False
         )
 
