@@ -129,7 +129,7 @@ async def actualizar_mensaje_sueldos():
 
         embed.add_field(
             name="💰 Sueldos Pendientes",
-            value="\\n".join(lista_sueldos),
+            value="\n".join(lista_sueldos),
             inline=False
         )
         embed.add_field(
