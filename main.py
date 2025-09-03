@@ -82,7 +82,7 @@ CANAL_SUELDOS_ID = 1295477203898859610  # Reemplazar con el ID de tu canal
 CANAL_EVIDENCIAS_ID = 1336202299311394827  # Reemplazar con el ID de tu canal de evidencias
 
 # ID del mensaje de sueldos (debes reemplazar con el ID real del mensaje que quieres editar)
-MENSAJE_SUELDOS_ID = 1412480685696094259  # Aquí debes poner el ID del mensaje que quieres que el bot edite siempre
+MENSAJE_SUELDOS_ID = 1412868814760181830  # Aquí debes poner el ID del mensaje que quieres que el bot edite siempre
 
 # Función para obtener el nombre a mostrar (apodo o nombre de usuario)
 def get_display_name(member):
