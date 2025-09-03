@@ -5,6 +5,7 @@ from discord.ext import commands
 import datetime
 import pytz
 import os
+import json   # Agregado para persistencia
 from datetime import timedelta
 import aiohttp
 import re
@@ -47,14 +48,41 @@ RANGOS_PAGOS = {
 
 # Diccionarios para almacenamiento
 trabajando = {}
-sueldos = {}
-servicios_finalizados = {}  # Nuevo diccionario para servicios finalizados
-historial_servicios = {} # Diccionario de estadísticas
+servicios_finalizados = {}  # Diccionario para servicios finalizados
+
+# Sistema de persistencia para sueldos
+ARCHIVO_SUELDOS = "sueldos.json"
+
+def cargar_sueldos():
+    """Carga los sueldos desde el archivo JSON"""
+    if os.path.exists(ARCHIVO_SUELDOS):
+        try:
+            with open(ARCHIVO_SUELDOS, "r") as f:
+                data = json.load(f)
+                # Convertir las claves string a int para compatibilidad
+                return {int(k): v for k, v in data.items()}
+        except:
+            return {}
+    return {}
+
+def guardar_sueldos():
+    """Guarda los sueldos en el archivo JSON"""
+    try:
+        with open(ARCHIVO_SUELDOS, "w") as f:
+            # Convertir las claves int a string para JSON
+            json.dump({str(k): v for k, v in sueldos.items()}, f, indent=2)
+    except Exception as e:
+        print(f"Error al guardar sueldos: {e}")
+
+# Cargar sueldos al iniciar
+sueldos = cargar_sueldos()
 
 # Configuración de canales
-CANAL_SUELDOS_ID = 1295477203898859610  # Reemplazar con el ID de tu canal
+CANAL_SUELDOS_ID = 1331364663874551859  # Reemplazar con el ID de tu canal
 CANAL_EVIDENCIAS_ID = 1336202299311394827  # Reemplazar con el ID de tu canal de evidencias
-mensaje_sueldos_id = None
+
+# ID del mensaje de sueldos (debes reemplazar con el ID real del mensaje que quieres editar)
+MENSAJE_SUELDOS_ID = 1412480685696094259  # Aquí debes poner el ID del mensaje que quieres que el bot edite siempre
 
 # Función para obtener el nombre a mostrar (apodo o nombre de usuario)
 def get_display_name(member):
@@ -86,11 +114,19 @@ async def on_ready():
     except Exception as e:
         print(f"Error al sincronizar comandos: {e}")
 
+    # Actualizar mensaje de sueldos al iniciar para cargar datos previos
+    await actualizar_mensaje_sueldos()
+
 def obtener_hora_servidor():
     return datetime.datetime.now(ZONA_HORARIA)
 
-async def actualizar_mensaje_sueldos(channel):
-    global mensaje_sueldos_id
+async def actualizar_mensaje_sueldos():
+    global MENSAJE_SUELDOS_ID
+
+    canal_sueldos = bot.get_channel(CANAL_SUELDOS_ID)
+    if not canal_sueldos:
+        print("Error: No se pudo encontrar el canal de sueldos")
+        return
 
     if not sueldos:
         embed = discord.Embed(
@@ -109,21 +145,21 @@ async def actualizar_mensaje_sueldos(channel):
         lista_sueldos = []
 
         for user_id, monto in sueldos.items():
-            member = channel.guild.get_member(user_id)
+            member = canal_sueldos.guild.get_member(user_id)
             if member:
                 display_name = get_display_name(member)
                 lista_sueldos.append(f"**{display_name}**: ${monto:,}")
             else:
-                usuario = await bot.fetch_user(user_id)
-                lista_sueldos.append(f"**{usuario.name}**: ${monto:,}")
+                try:
+                    usuario = await bot.fetch_user(user_id)
+                    lista_sueldos.append(f"**{usuario.name}**: ${monto:,}")
+                except:
+                    lista_sueldos.append(f"**Usuario desconocido**: ${monto:,}")
             total_general += monto
-
-        # Aquí está la corrección - usar join con un salto de línea real
-        sueldos_texto = "\n".join(lista_sueldos)
 
         embed.add_field(
             name="💰 Sueldos Pendientes",
-            value=sueldos_texto,
+            value="\n".join(lista_sueldos),  # Corregido: salto de línea real
             inline=False
         )
         embed.add_field(
@@ -132,16 +168,26 @@ async def actualizar_mensaje_sueldos(channel):
             inline=False
         )
 
-    if mensaje_sueldos_id:
+    # Si tenemos un ID de mensaje específico, intentamos editarlo
+    if MENSAJE_SUELDOS_ID:
         try:
-            mensaje = await channel.fetch_message(mensaje_sueldos_id)
+            mensaje = await canal_sueldos.fetch_message(MENSAJE_SUELDOS_ID)
             await mensaje.edit(embed=embed)
-        except:
-            mensaje = await channel.send(embed=embed)
-            mensaje_sueldos_id = mensaje.id
+            print(f"Mensaje de sueldos actualizado (ID: {MENSAJE_SUELDOS_ID})")
+        except discord.NotFound:
+            print(f"Mensaje con ID {MENSAJE_SUELDOS_ID} no encontrado, creando nuevo mensaje")
+            mensaje = await canal_sueldos.send(embed=embed)
+            MENSAJE_SUELDOS_ID = mensaje.id
+            print(f"Nuevo mensaje de sueldos creado (ID: {MENSAJE_SUELDOS_ID})")
+        except Exception as e:
+            print(f"Error al editar mensaje de sueldos: {e}")
+            mensaje = await canal_sueldos.send(embed=embed)
+            MENSAJE_SUELDOS_ID = mensaje.id
     else:
-        mensaje = await channel.send(embed=embed)
-        mensaje_sueldos_id = mensaje.id
+        # Si no tenemos ID, creamos un nuevo mensaje
+        mensaje = await canal_sueldos.send(embed=embed)
+        MENSAJE_SUELDOS_ID = mensaje.id
+        print(f"Mensaje de sueldos creado (ID: {MENSAJE_SUELDOS_ID})")
 
 class TerminarView(discord.ui.View):
     def __init__(self, user_id: int):
@@ -169,20 +215,6 @@ class TerminarView(discord.ui.View):
             pago_por_hora = obtener_pago_por_hora(interaction.guild.get_member(self.user_id))
             pago_total = calcular_pago(pago_por_hora, duracion)
 
-            # Guardar en historial pero SIN agregar al sueldo todavía
-            if self.user_id not in historial_servicios:
-                historial_servicios[self.user_id] = []
-
-            historial_servicios[self.user_id].append({
-                'fecha': tiempo_final.strftime("%d/%m/%Y"),
-                'hora_inicio': tiempo_inicio.strftime("%H:%M:%S"),
-                'hora_fin': tiempo_final.strftime("%H:%M:%S"),
-                'duracion': duracion,
-                'motivo': motivo,
-                'pago': pago_total,
-                'pago_registrado': False  # Indicador de que el pago aún no se ha registrado
-            })
-
             servicios_finalizados[self.user_id] = {
                 'tiempo_fin': tiempo_final,
                 'duracion': duracion,
@@ -190,6 +222,18 @@ class TerminarView(discord.ui.View):
                 'tiempo_inicio': tiempo_inicio,
                 'pago': pago_total
             }
+
+            # Agregar el pago al sueldo del usuario
+            if self.user_id in sueldos:
+                sueldos[self.user_id] += pago_total
+            else:
+                sueldos[self.user_id] = pago_total
+
+            # Guardar sueldos en archivo JSON
+            guardar_sueldos()
+
+            # Actualizar mensaje de sueldos
+            await actualizar_mensaje_sueldos()
 
             horas = int(duracion.total_seconds() // 3600)
             minutos = int((duracion.total_seconds() % 3600) // 60)
@@ -215,8 +259,8 @@ class TerminarView(discord.ui.View):
                 inline=False
             )
             embed.add_field(
-                name="💰 Pago pendiente por servicio",
-                value=f"${pago_total:,} (se registrará al enviar evidencias)",
+                name="💰 Pago por servicio",
+                value=f"${pago_total:,}",
                 inline=False
             )
             embed.add_field(
@@ -265,7 +309,7 @@ async def trabajar(interaction: discord.Interaction, motivo: str):
             segundos = int(tiempo_restante.total_seconds() % 60)
             embed_error = discord.Embed(
                 title="⚠️ Error",
-                description=f"Tienes un servicio pendiente de evidencias."
+                description=f"Tienes un servicio pendiente de evidencias.\n"
                            f"Debes enviar las evidencias del servicio anterior usando `/evidencia` o esperar "
                            f"{minutos}m {segundos}s para que expire el tiempo límite.",
                 color=COLOR_ERROR
@@ -280,7 +324,7 @@ async def trabajar(interaction: discord.Interaction, motivo: str):
     if not motivo or motivo.isspace():
         embed_error = discord.Embed(
             title="⚠️ Error",
-            description="Debes especificar el motivo del servicio.\\nEjemplo: `/trabajar Transmisión de radio`",
+            description="Debes especificar el motivo del servicio.\nEjemplo: `/trabajar Transmisión de radio`",
             color=COLOR_ERROR
         )
         await interaction.response.send_message(embed=embed_error, ephemeral=True)
@@ -317,7 +361,7 @@ async def trabajar(interaction: discord.Interaction, motivo: str):
 
 @bot.tree.command(name="evidencia", description="Anexar evidencias de tu servicio finalizado")
 async def evidencia(
-    interaction: discord.Interaction,
+    interaction: discord.Interaction, 
     imagen1: discord.Attachment = None,
     imagen2: discord.Attachment = None,
     imagen3: discord.Attachment = None,
@@ -359,25 +403,6 @@ async def evidencia(
 
     servicio_info = servicios_finalizados[usuario_id]
     duracion = servicio_info['duracion']
-    pago_total = servicio_info['pago']
-
-    # Agregar el pago al sueldo del usuario AHORA que ha enviado evidencias
-    if usuario_id in sueldos:
-        sueldos[usuario_id] += pago_total
-    else:
-        sueldos[usuario_id] = pago_total
-
-    # Actualizar el historial para marcar que el pago ya se registró
-    for servicio in historial_servicios.get(usuario_id, []):
-        if (servicio['hora_inicio'] == servicio_info['tiempo_inicio'].strftime("%H:%M:%S") and
-            servicio['hora_fin'] == servicio_info['tiempo_fin'].strftime("%H:%M:%S")):
-            servicio['pago_registrado'] = True
-            break
-
-    # Actualizar mensaje de sueldos
-    canal_sueldos = bot.get_channel(CANAL_SUELDOS_ID)
-    await actualizar_mensaje_sueldos(canal_sueldos)
-
     horas = int(duracion.total_seconds() // 3600)
     minutos = int((duracion.total_seconds() % 3600) // 60)
     segundos = int(duracion.total_seconds() % 60)
@@ -402,7 +427,7 @@ async def evidencia(
     )
     embed.add_field(
         name="💰 Pago por servicio",
-        value=f"${pago_total:,} (registrado)",
+        value=f"${servicio_info['pago']:,}",
         inline=False
     )
     embed.add_field(
@@ -443,7 +468,7 @@ async def evidencia(
         del servicios_finalizados[usuario_id]
         embed_success = discord.Embed(
             title="✅ Evidencias Enviadas",
-            description=f"Se han registrado correctamente {evidencias_count} evidencia(s) y se ha añadido ${pago_total:,} a tu sueldo.",
+            description=f"Se han registrado correctamente {evidencias_count} evidencia(s).",
             color=COLOR_NARANJA
         )
         await interaction.followup.send(embed=embed_success)
@@ -480,8 +505,10 @@ async def agregar_paga(interaction: discord.Interaction, usuario: discord.Member
     else:
         sueldos[usuario.id] = valor
 
-    canal_sueldos = bot.get_channel(CANAL_SUELDOS_ID)
-    await actualizar_mensaje_sueldos(canal_sueldos)
+    # Guardar sueldos en archivo JSON
+    guardar_sueldos()
+
+    await actualizar_mensaje_sueldos()
 
     # Usar el apodo en lugar del nombre de usuario
     display_name = get_display_name(usuario)
@@ -535,8 +562,10 @@ async def retirar_dinero(interaction: discord.Interaction, usuario: discord.Memb
     if sueldos[usuario.id] == 0:
         del sueldos[usuario.id]
 
-    canal_sueldos = bot.get_channel(CANAL_SUELDOS_ID)
-    await actualizar_mensaje_sueldos(canal_sueldos)
+    # Guardar sueldos en archivo JSON
+    guardar_sueldos()
+
+    await actualizar_mensaje_sueldos()
 
     # Usar el apodo en lugar del nombre de usuario
     display_name = get_display_name(usuario)
@@ -571,253 +600,16 @@ async def limpiar(interaction: discord.Interaction):
     total_limpiado = sum(sueldos.values())
     sueldos.clear()
 
-    canal_sueldos = bot.get_channel(CANAL_SUELDOS_ID)
-    await actualizar_mensaje_sueldos(canal_sueldos)
+    # Guardar sueldos vacíos en archivo JSON
+    guardar_sueldos()
+
+    await actualizar_mensaje_sueldos()
 
     embed = discord.Embed(
         title="🧹 Registros Limpiados",
-        description=f"Se han limpiado todos los registros de sueldos. Total liquidado: ${total_limpiado:,}",
+        description=f"Se han limpiado todos los registros de sueldos.\nTotal liquidado: ${total_limpiado:,}",
         color=COLOR_NARANJA
     )
-    await interaction.response.send_message(embed=embed)
-
-@bot.tree.command(name="estadisticas", description="Ver estadísticas de servicios")
-async def estadisticas(interaction: discord.Interaction, usuario: discord.Member = None):
-    if usuario:
-        # Estadísticas individuales
-        if usuario.id not in historial_servicios or not historial_servicios[usuario.id]:
-            embed_error = discord.Embed(
-                title="📊 Error",
-                description="No hay servicios registrados para este usuario.",
-                color=COLOR_ERROR
-            )
-            await interaction.response.send_message(embed=embed_error, ephemeral=True)
-            return
-
-        servicios = historial_servicios[usuario.id]
-        tiempo_total = timedelta()
-        pago_total = 0
-
-        # Calcular tiempo total y pago total
-        for servicio in servicios:
-            tiempo_total += servicio['duracion']
-            if 'pago' in servicio:
-                pago_total += servicio['pago']
-
-        # Usar el apodo en lugar del nombre de usuario
-        display_name = get_display_name(usuario)
-
-        # Crear embed
-        embed = discord.Embed(
-            title="📊 Estadística General",
-            description=f"Periodista: {display_name} ({usuario.mention})",
-            color=COLOR_NARANJA
-        )
-
-        # Lista de servicios
-        servicios_lista = []
-        for servicio in servicios:
-            duracion = servicio['duracion']
-            horas = int(duracion.total_seconds() // 3600)
-            minutos = int((duracion.total_seconds() % 3600) // 60)
-            segundos = int(duracion.total_seconds() % 60)
-
-            pago_str = f", Pago: ${servicio.get('pago', 0):,}" if 'pago' in servicio else ""
-
-            servicios_lista.append(f"• {servicio['fecha']}, Motivo: {servicio['motivo']}, {horas}h {minutos}M {segundos}s{pago_str}")
-
-        # Unir la lista con saltos de línea reales
-        servicios_str = "\n".join(servicios_lista)
-
-        embed.add_field(
-            name="📋 Servicios Registrados",
-            value=servicios_str,
-            inline=False
-        )
-
-        # Tiempo total
-        horas_total = int(tiempo_total.total_seconds() // 3600)
-        minutos_total = int((tiempo_total.total_seconds() % 3600) // 60)
-        segundos_total = int(tiempo_total.total_seconds() % 60)
-
-        embed.add_field(
-            name="⏱️ Tiempo Total General",
-            value=f"{horas_total}h {minutos_total}M {segundos_total}s",
-            inline=False
-        )
-
-        # Pago total
-        embed.add_field(
-            name="💰 Pago Total",
-            value=f"${pago_total:,}",
-            inline=False
-        )
-
-    else:
-        # Estadísticas generales de la facción
-        if not historial_servicios:
-            embed_error = discord.Embed(
-                title="📊 Error",
-                description="No hay servicios registrados en la facción.",
-                color=COLOR_ERROR
-            )
-            await interaction.response.send_message(embed=embed_error, ephemeral=True)
-            return
-
-        embed = discord.Embed(
-            title="📊 Estadística General",
-            description="Lista de servicios por periodista:",
-            color=COLOR_NARANJA
-        )
-
-        tiempo_total_general = timedelta()
-        pago_total_general = 0
-        lista_servicios = []
-
-        # Calcular tiempo total por usuario
-        for user_id, servicios in historial_servicios.items():
-            tiempo_usuario = timedelta()
-            pago_usuario = 0
-
-            for servicio in servicios:
-                tiempo_usuario += servicio['duracion']
-                if 'pago' in servicio:
-                    pago_usuario += servicio['pago']
-
-            member = interaction.guild.get_member(user_id)
-            if member:
-                display_name = get_display_name(member)
-            else:
-                usuario = await bot.fetch_user(user_id)
-                display_name = usuario.name
-
-            horas = int(tiempo_usuario.total_seconds() // 3600)
-            minutos = int((tiempo_usuario.total_seconds() % 3600) // 60)
-            segundos = int(tiempo_usuario.total_seconds() % 60)
-
-            lista_servicios.append(f"• {display_name}: {horas}h {minutos}M {segundos}s, Pago: ${pago_usuario:,}")
-            tiempo_total_general += tiempo_usuario
-            pago_total_general += pago_usuario
-
-        # Unir la lista con saltos de línea reales
-        servicios_texto = "\n".join(lista_servicios)
-
-        # Agregar lista de servicios
-        embed.add_field(
-            name="📋 Tiempo Total por Periodista",
-            value=servicios_texto,
-            inline=False
-        )
-
-        # Agregar tiempo total general
-        horas = int(tiempo_total_general.total_seconds() // 3600)
-        minutos = int((tiempo_total_general.total_seconds() % 3600) // 60)
-        segundos = int(tiempo_total_general.total_seconds() % 60)
-
-        embed.add_field(
-            name="⏱️ Tiempo Total General",
-            value=f"{horas}h {minutos}M {segundos}s",
-            inline=False
-        )
-
-        # Agregar pago total general
-        embed.add_field(
-            name="💰 Pago Total General",
-            value=f"${pago_total_general:,}",
-            inline=False
-        )
-
-    await interaction.response.send_message(embed=embed)
-
-@bot.tree.command(name="limpiar-estadisticas", description="Limpiar registros de estadísticas")
-async def limpiar_estadistica(interaction: discord.Interaction, usuario: discord.Member = None):
-    # Verificar si el usuario tiene el rol "directivo"
-    if not any(role.name.lower() == "directivo" for role in interaction.user.roles):
-        embed_error = discord.Embed(
-            title="⚠️ Error",
-            description="No tienes permiso para usar este comando. Solo los directivos pueden limpiar estadísticas.",
-            color=COLOR_ERROR
-        )
-        await interaction.response.send_message(embed=embed_error, ephemeral=True)
-        return
-
-    # Si se especifica un usuario
-    if usuario:
-        if usuario.id not in historial_servicios or not historial_servicios[usuario.id]:
-            # Usar el apodo en lugar del nombre de usuario
-            display_name = get_display_name(usuario)
-
-            embed_error = discord.Embed(
-                title="⚠️ Error",
-                description=f"No hay registros de estadísticas para {display_name}.",
-                color=COLOR_ERROR
-            )
-            await interaction.response.send_message(embed=embed_error, ephemeral=True)
-            return
-
-        # Guardar estadísticas antes de limpiar para mostrar resumen
-        servicios = len(historial_servicios[usuario.id])
-        tiempo_total = sum(servicio['duracion'].total_seconds() for servicio in historial_servicios[usuario.id])
-        pago_total = sum(servicio.get('pago', 0) for servicio in historial_servicios[usuario.id])
-
-        horas = int(tiempo_total // 3600)
-        minutos = int((tiempo_total % 3600) // 60)
-        segundos = int(tiempo_total % 60)
-
-        # Limpiar estadísticas del usuario
-        del historial_servicios[usuario.id]
-
-        embed = discord.Embed(
-            title="🗑️ Estadísticas Limpiadas",
-            description=f"Se han limpiado las estadísticas de {usuario.mention}",
-            color=COLOR_NARANJA
-        )
-        embed.add_field(
-            name="📊 Resumen de registros eliminados",
-            value=f"• Total de servicios: {servicios} • Tiempo total: {horas}h {minutos}M {segundos}s • Pago total: ${pago_total:,}",
-            inline=False
-        )
-
-    # Si no se especifica usuario (limpiar todo)
-    else:
-        if not historial_servicios:
-            embed_error = discord.Embed(
-                title="⚠️ Error",
-                description="No hay registros de estadísticas para limpiar.",
-                color=COLOR_ERROR
-            )
-            await interaction.response.send_message(embed=embed_error, ephemeral=True)
-            return
-
-        # Guardar estadísticas generales antes de limpiar
-        total_servicios = sum(len(servicios) for servicios in historial_servicios.values())
-        tiempo_total = timedelta()
-        pago_total = 0
-
-        for servicios in historial_servicios.values():
-            for servicio in servicios:
-                tiempo_total += servicio['duracion']
-                if 'pago' in servicio:
-                    pago_total += servicio['pago']
-
-        horas = int(tiempo_total.total_seconds() // 3600)
-        minutos = int((tiempo_total.total_seconds() % 3600) // 60)
-        segundos = int(tiempo_total.total_seconds() % 60)
-
-        # Limpiar todas las estadísticas
-        historial_servicios.clear()
-
-        embed = discord.Embed(
-            title="🗑️ Estadísticas Generales Limpiadas",
-            description="Se han limpiado todas las estadísticas de la facción",
-            color=COLOR_NARANJA
-        )
-        embed.add_field(
-            name="📊 Resumen de registros eliminados",
-            value=f"• Total de servicios: {total_servicios} • Tiempo total: {horas}h {minutos}M {segundos}s • Pago total: ${pago_total:,}",
-            inline=False
-        )
-
     await interaction.response.send_message(embed=embed)
 
 # Iniciar el bot
