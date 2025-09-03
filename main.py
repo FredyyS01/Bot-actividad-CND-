@@ -78,7 +78,7 @@ def guardar_sueldos():
 sueldos = cargar_sueldos()
 
 # Configuración de canales
-CANAL_SUELDOS_ID = 1331364663874551859  # Reemplazar con el ID de tu canal
+CANAL_SUELDOS_ID = 1295477203898859610  # Reemplazar con el ID de tu canal
 CANAL_EVIDENCIAS_ID = 1336202299311394827  # Reemplazar con el ID de tu canal de evidencias
 
 # ID del mensaje de sueldos (debes reemplazar con el ID real del mensaje que quieres editar)
