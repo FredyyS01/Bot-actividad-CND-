@@ -5,7 +5,7 @@ from discord.ext import commands
 import datetime
 import pytz
 import os
-import json   # Agregado para persistencia
+import json   # Para manejar los datos en Discord
 from datetime import timedelta
 import aiohttp
 import re
@@ -50,32 +50,117 @@ RANGOS_PAGOS = {
 trabajando = {}
 servicios_finalizados = {}  # Diccionario para servicios finalizados
 
-# Sistema de persistencia para sueldos
-ARCHIVO_SUELDOS = "sueldos.json"
+# ===== CONFIGURACIÓN DE DISCORD COMO BASE DE DATOS =====
+# IMPORTANTE: Reemplaza estos IDs con los de tu servidor de base de datos
+SERVIDOR_DATABASE_ID = 1414983155592462568  # ID del servidor donde está la base de datos (None = mismo servidor)
+CANAL_DATABASE_ID = 1414984211219222709  # ⚠️ REEMPLAZA CON EL ID DE TU CANAL DE BASE DE DATOS
+MENSAJE_DATABASE_ID = None  # Se creará automáticamente
 
-def cargar_sueldos():
-    """Carga los sueldos desde el archivo JSON"""
-    if os.path.exists(ARCHIVO_SUELDOS):
-        try:
-            with open(ARCHIVO_SUELDOS, "r") as f:
-                data = json.load(f)
-                # Convertir las claves string a int para compatibilidad
-                return {int(k): v for k, v in data.items()}
-        except:
-            return {}
-    return {}
+# Sistema de persistencia usando Discord como base de datos
+async def cargar_sueldos_desde_discord():
+    """Carga los sueldos desde un mensaje en Discord"""
+    global MENSAJE_DATABASE_ID
 
-def guardar_sueldos():
-    """Guarda los sueldos en el archivo JSON"""
     try:
-        with open(ARCHIVO_SUELDOS, "w") as f:
-            # Convertir las claves int a string para JSON
-            json.dump({str(k): v for k, v in sueldos.items()}, f, indent=2)
-    except Exception as e:
-        print(f"Error al guardar sueldos: {e}")
+        # Obtener el canal de base de datos
+        if SERVIDOR_DATABASE_ID:
+            servidor = bot.get_guild(SERVIDOR_DATABASE_ID)
+            canal_db = servidor.get_channel(CANAL_DATABASE_ID)
+        else:
+            canal_db = bot.get_channel(CANAL_DATABASE_ID)
 
-# Cargar sueldos al iniciar
-sueldos = cargar_sueldos()
+        if not canal_db:
+            print("⚠️ Canal de base de datos no encontrado")
+            return {}
+
+        # Si tenemos un ID de mensaje, intentamos cargarlo
+        if MENSAJE_DATABASE_ID:
+            try:
+                mensaje = await canal_db.fetch_message(MENSAJE_DATABASE_ID)
+                data = json.loads(mensaje.content)
+                sueldos_data = data.get('sueldos', {})
+                # Convertir claves string a int
+                sueldos_convertidos = {int(k): v for k, v in sueldos_data.items()}
+                print(f"✅ Sueldos cargados desde Discord: {len(sueldos_convertidos)} registros")
+                return sueldos_convertidos
+            except discord.NotFound:
+                print("⚠️ Mensaje de base de datos no encontrado, se creará uno nuevo")
+                MENSAJE_DATABASE_ID = None
+            except json.JSONDecodeError:
+                print("⚠️ Error al decodificar JSON del mensaje")
+            except Exception as e:
+                print(f"⚠️ Error al cargar desde Discord: {e}")
+
+        # Si no hay mensaje o hubo error, buscar el último mensaje del bot
+        async for mensaje in canal_db.history(limit=50):
+            if mensaje.author == bot.user:
+                try:
+                    data = json.loads(mensaje.content)
+                    if 'sueldos' in data:
+                        MENSAJE_DATABASE_ID = mensaje.id
+                        sueldos_data = data.get('sueldos', {})
+                        sueldos_convertidos = {int(k): v for k, v in sueldos_data.items()}
+                        print(f"✅ Sueldos recuperados desde Discord: {len(sueldos_convertidos)} registros")
+                        return sueldos_convertidos
+                except:
+                    continue
+
+        print("ℹ️ No se encontraron datos previos, iniciando con base de datos vacía")
+        return {}
+
+    except Exception as e:
+        print(f"❌ Error crítico al cargar desde Discord: {e}")
+        return {}
+
+async def guardar_sueldos_en_discord():
+    """Guarda los sueldos en un mensaje de Discord"""
+    global MENSAJE_DATABASE_ID
+
+    try:
+        # Obtener el canal de base de datos
+        if SERVIDOR_DATABASE_ID:
+            servidor = bot.get_guild(SERVIDOR_DATABASE_ID)
+            canal_db = servidor.get_channel(CANAL_DATABASE_ID)
+        else:
+            canal_db = bot.get_channel(CANAL_DATABASE_ID)
+
+        if not canal_db:
+            print("❌ No se pudo acceder al canal de base de datos")
+            return
+
+        # Preparar los datos
+        data = {
+            'sueldos': {str(k): v for k, v in sueldos.items()},
+            'timestamp': datetime.datetime.now().isoformat(),
+            'total_usuarios': len(sueldos),
+            'total_dinero': sum(sueldos.values())
+        }
+
+        contenido_json = json.dumps(data, indent=2, ensure_ascii=False)
+
+        # Si tenemos un mensaje existente, editarlo
+        if MENSAJE_DATABASE_ID:
+            try:
+                mensaje = await canal_db.fetch_message(MENSAJE_DATABASE_ID)
+                await mensaje.edit(content=contenido_json)
+                print(f"✅ Base de datos actualizada en Discord (ID: {MENSAJE_DATABASE_ID})")
+                return
+            except discord.NotFound:
+                print("⚠️ Mensaje de base de datos no encontrado, creando uno nuevo")
+                MENSAJE_DATABASE_ID = None
+            except Exception as e:
+                print(f"⚠️ Error al editar mensaje: {e}")
+
+        # Crear nuevo mensaje
+        mensaje = await canal_db.send(contenido_json)
+        MENSAJE_DATABASE_ID = mensaje.id
+        print(f"✅ Nueva base de datos creada en Discord (ID: {MENSAJE_DATABASE_ID})")
+
+    except Exception as e:
+        print(f"❌ Error al guardar en Discord: {e}")
+
+# Cargar sueldos al iniciar (se hará en on_ready)
+sueldos = {}
 
 # Configuración de canales
 CANAL_SUELDOS_ID = 1295477203898859610  # Reemplazar con el ID de tu canal
@@ -108,6 +193,11 @@ def calcular_pago(pago_por_hora, duracion):
 @bot.event
 async def on_ready():
     print(f'Bot conectado como: {bot.user.name}')
+
+    # Cargar sueldos desde Discord
+    global sueldos
+    sueldos = await cargar_sueldos_desde_discord()
+
     try:
         synced = await bot.tree.sync()
         print(f"Sincronizados {len(synced)} comandos")
@@ -229,8 +319,8 @@ class TerminarView(discord.ui.View):
             else:
                 sueldos[self.user_id] = pago_total
 
-            # Guardar sueldos en archivo JSON
-            guardar_sueldos()
+            # Guardar sueldos en Discord
+            await guardar_sueldos_en_discord()
 
             # Actualizar mensaje de sueldos
             await actualizar_mensaje_sueldos()
@@ -505,8 +595,8 @@ async def agregar_paga(interaction: discord.Interaction, usuario: discord.Member
     else:
         sueldos[usuario.id] = valor
 
-    # Guardar sueldos en archivo JSON
-    guardar_sueldos()
+    # Guardar sueldos en Discord
+    await guardar_sueldos_en_discord()
 
     await actualizar_mensaje_sueldos()
 
@@ -562,8 +652,8 @@ async def retirar_dinero(interaction: discord.Interaction, usuario: discord.Memb
     if sueldos[usuario.id] == 0:
         del sueldos[usuario.id]
 
-    # Guardar sueldos en archivo JSON
-    guardar_sueldos()
+    # Guardar sueldos en Discord
+    await guardar_sueldos_en_discord()
 
     await actualizar_mensaje_sueldos()
 
@@ -600,8 +690,8 @@ async def limpiar(interaction: discord.Interaction):
     total_limpiado = sum(sueldos.values())
     sueldos.clear()
 
-    # Guardar sueldos vacíos en archivo JSON
-    guardar_sueldos()
+    # Guardar sueldos vacíos en Discord
+    await guardar_sueldos_en_discord()
 
     await actualizar_mensaje_sueldos()
 
